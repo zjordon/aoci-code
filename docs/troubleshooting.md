@@ -105,6 +105,69 @@ stdio MCP is incremental. Keep stdin open, send `initialize`, wait for its respo
 
 They do not change the formal index or Baseline. With Ledger enabled they may append local audit events, and Verify may write Verify History. Use an isolated copy when an audit requires literally zero filesystem writes.
 
+## Formal Volume Baseline drift
+
+`managed_scope_formal_volume_baseline_drift: <asset>` means Scope Change could
+not read a formal cognition asset or its fingerprint differs from the active
+Baseline. This can follow an out-of-band edit to a Volume even when its syntax
+still passes validation. It is different from an indexed business source
+becoming Stale or a desired policy changing. `scope activate` cannot approve
+that edit, `baseline scope` is a Legacy refresh that refuses Managed Scope,
+and `scan --force` is not a recovery override.
+
+Preserve the current formal assets, Baseline, and transaction evidence before
+attempting recovery. Check that the named asset is readable, then inspect
+`aoci index agent guide --json` for pending Recovery and follow the existing
+receipt-specific resume or rollback route in
+[Overview refuses on a file under `.aoci/transactions`](#overview-refuses-on-a-file-under-aocitransactions).
+Do not discard a
+receipt or overwrite its preimage to make activation pass.
+
+If there is no recoverable transaction, use a known matching backup or Git
+snapshot: first verify the formal assets and Baseline belong together, then
+restore that consistent state and replay the intended changes through the
+supported authoring/removal workflow. Preserve any later work separately;
+restoring only one file from an unrelated snapshot is not a consistent
+recovery. Without a verified matching state, stop for maintainer-reviewed
+recovery. Editing Baseline hashes merely accepts unverified bytes and is not
+a supported substitute. After recovery, run Verify, Check, and the Guide;
+resume any remaining source or policy maintenance from their current results.
+
+For byte-identical orphan Entry lines in different directory sections, the
+path-based deletion fix in commit `6b4f0cc` addresses the original refusal
+(#117). Use an official release containing that fix when available; manually
+deleting lines from a formal Volume can instead create this Baseline drift.
+
+## A Volume shows as `observed_removed`, and nothing can acknowledge it
+
+Through rc22 a Managed Scope rule could match a formal asset. A rule that gave
+`aoci.code.txt` the observe role recorded the Volume in the Baseline as Observe
+evidence, and the readers disagreed about that record: Verify, Check, and the
+Guide listed the Volume as `observed_removed` with `observed_pending=1`,
+`scope acknowledge` answered `observed_evidence_review_not_pending`, and every
+`scope preview`, including one that would restore the rule, answered
+`observed_evidence_review_required` (#158).
+
+From v0.1.0-rc23 formal assets are outside policy: a rule never changes the
+role of the Root or a declared Volume, status, governance, and a Scope Change
+Plan strip them through one projection, and `scope rule add` or `update`
+refuses an exact file rule naming one as
+`managed_scope_rule_targets_formal_asset`. A repository already in that state
+reads aligned as soon as the fixed binary runs. Then:
+
+```bash
+aoci scope activate --json
+aoci verify --json && aoci check --json
+```
+
+Under `apply_authorization: auto` activation applies with nothing to approve
+and writes the Volume's Baseline role back to `index`; under `review` it
+pauses for the usual `scope approve` and `scope apply`. The rule can stay,
+be switched off with `scope rule update <id> --enabled=false`, or go; it no
+longer reaches the Volume either way. Nothing here edits the Baseline by hand
+or uses `scan --force`. A Legacy index file is not a formal asset of this
+kind: its `aoci.txt` stays governed by the rules exactly as before.
+
 ## A run returns `repair_required`
 
 Repair only the candidates explicitly identified by the current response, preserve their source and candidate/batch bindings, and resubmit the complete current machine-issued batch. Do not drop unrelated candidates or construct a replacement state manually. If `remaining` is nonzero after a successful Apply, call Maintain again; do not reduce Scope or slice the returned batch to fit transport.
@@ -477,3 +540,26 @@ it:
 aoci ui --detach --json
 aoci ui --stop
 ```
+
+Open the complete link printed by the current process: the fragment carries
+the page's access capability. Repository API requests without it return 401.
+The browser stores it for the current tab, never in persistent local storage,
+and removes it from the address bar when session storage is available. Do not
+share the readiness link. A legacy page can still be stopped, but a new detach
+command refuses to replace its registration while it is live: run
+`aoci ui --stop` for that repository first. Only authenticated pages are reused.
+If the browser shows the access notice instead of the index, open the
+complete printed link: `--open` on some systems hands the browser the URL
+without its fragment. Before downgrading, stop the page using the same binary
+that started it.
+
+## Model endpoint refusals
+
+Configure the final HTTP(S) completion base URL directly. The optional model
+client does not follow redirects, and base URLs with user information, query
+strings or fragments are refused. Authentication remains in the configured
+credential environment variable. Error output keeps the HTTP status, the error
+category, and a sanitized cause class (dns, refused, reset, unreachable, tls,
+timeout, redirect), but omits the endpoint's own error text and the raw
+transport error. For a provider-side rejection read the provider's logs; for a
+connection failure check the address, port, DNS name, and certificate directly.

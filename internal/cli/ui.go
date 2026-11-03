@@ -51,7 +51,7 @@ func newUICmd() *cobra.Command {
 			} else if flagRepo != "" {
 				return &ExitError{Code: ExitConfig, Msg: err.Error()}
 			}
-			roots = append(roots, also...)
+			roots = ui.NormalizeRoots(append(roots, also...))
 			if stop || detach {
 				if len(roots) == 0 {
 					return &ExitError{Code: ExitConfig, Msg: cliMessage("ui.error.no_repository")}
@@ -64,6 +64,15 @@ func newUICmd() *cobra.Command {
 					return stopUI(cmd, registry, roots[0])
 				}
 				return detachUI(cmd, registry, roots[0], port, host, discover, also, open)
+			}
+			if len(roots) > 0 {
+				if registry, err := ui.RegistryDir(""); err == nil {
+					if reg, ok := ui.Registered(registry, roots[0]); ok {
+						if err := refuseLiveLegacyPage(reg, ui.Live(reg, time.Second)); err != nil {
+							return err
+						}
+					}
+				}
 			}
 			options := ui.Options{
 				Roots: roots, Discover: discover, Host: host, Port: port,
@@ -104,6 +113,16 @@ func newUICmd() *cobra.Command {
 	return command
 }
 
+// refuseLiveLegacyPage keeps a tokenless page from an older binary reachable
+// by --stop: starting another page for the same root, foreground or detached,
+// would replace its registration and leave the unprotected process running.
+func refuseLiveLegacyPage(reg ui.Registration, live bool) error {
+	if live && !ui.HasAccessToken(reg.URL) {
+		return &ExitError{Code: ExitConfig, Msg: cliMessage("ui.error.legacy_page")}
+	}
+	return nil
+}
+
 func stopUI(cmd *cobra.Command, registry, root string) error {
 	reg, live, err := ui.Stop(registry, root, 5*time.Second)
 	if err != nil {
@@ -125,6 +144,9 @@ func stopUI(cmd *cobra.Command, registry, root string) error {
 // otherwise starts the same command as a detached child.
 func detachUI(cmd *cobra.Command, registry, root string, port int, host string, discover bool, also []string, open bool) error {
 	if reg, ok := ui.Registered(registry, root); ok && ui.Live(reg, time.Second) {
+		if err := refuseLiveLegacyPage(reg, true); err != nil {
+			return err
+		}
 		reportDetached(cmd, reg.URL, reg.PID, -1, true)
 		if open {
 			openBrowser(reg.URL)

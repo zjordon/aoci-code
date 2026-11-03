@@ -106,6 +106,16 @@ stores it in the recovery Intent. A Receipt cannot authorize another Envelope;
 policy or formal-preimage drift invalidates it. Resume reuses the immutable
 Intent Receipt and never asks for a new approval. Repeated Apply is idempotent.
 
+Formal cognition assets are outside policy. Under Volumes v1 the Root and its
+declared Volumes are evaluated as index-role objects whatever rules match
+them, their Baseline records are formal guards rather than Observe evidence
+for status, governance, and the Plan alike, a Volume's record carries the
+index role however it was recorded, and an exact file rule naming one is
+refused as managed_scope_rule_targets_formal_asset, while disabling such a
+rule is allowed. A git-hidden formal asset keeps the exclude role, so scan
+still refuses to omit it. The pin is a Volumes v1 fact decided by the Root
+marker at the repository root: a Legacy index file stays rule-governed.
+
 Auto permits governed Entry create, update, and retirement; every Scope role
 transition; reviewed Curation and semantic-transfer candidates; observe
 fingerprint advancement; and proven budget tightening. It requires complete
@@ -195,6 +205,13 @@ warning and maximum tokens, and complete non-overlapping C1-C9 target/maximum
 bands for R and S. Old projects without materialized policy use observe;
 new-project init materializes enforce. Project values are configurable and are
 not global constants.
+
+The S hard limit in tokens is the greater of the S band maximum and the
+effective S rune quota for that C (the Meta declaration floored by the machine
+default, exactly as the error-level rune gate resolves it). Tokens never exceed
+runes, so an S within its declared rune quota is never a budget violation, the
+S maximum reported to a model is that floored value, and the band binds only
+when a policy raises it above the quota. The R band stands alone.
 
 Reports measure Header, F, R, A, S, structure, total, largest Entries, largest
 R/S, and field violations. Only formal index-role cognition bytes count toward

@@ -20,6 +20,7 @@ import (
 	"github.com/aoci-spec/aoci-code/internal/dbcognition"
 	"github.com/aoci-spec/aoci-code/internal/dbevidence"
 	afs "github.com/aoci-spec/aoci-code/internal/fs"
+	"github.com/aoci-spec/aoci-code/internal/index"
 	"github.com/aoci-spec/aoci-code/internal/machinecontract"
 	"github.com/aoci-spec/aoci-code/internal/managedstate"
 )
@@ -575,14 +576,11 @@ func assessCode(root string, cfg *config.Config, set *cognition.Set, baselineSta
 		facts.Findings = append(facts.Findings, Finding{Code: "scope_change_required", Domain: cognition.ScopeCode})
 		return
 	}
+	// Formal assets leave both the snapshot and the Baseline here, through the
+	// projection Scope status and the Scope Change Plan use, so a Volume's own
+	// Baseline record can never read as removed Observe evidence (#158).
 	copyState := *managed
-	copyState.Snapshot = cloneSnapshot(managed.Snapshot)
-	delete(copyState.Snapshot, set.Root.Descriptor.Path)
-	for _, formal := range set.Volumes {
-		if formal != nil {
-			delete(copyState.Snapshot, formal.Descriptor.Path)
-		}
-	}
+	copyState.Snapshot, copyState.Baseline = cognition.BusinessScope(managed.Snapshot, managed.Baseline)
 	detected, err := managedstate.Detect(root, cfg, asset.Document, &copyState)
 	if err != nil {
 		facts.Findings = append(facts.Findings, Finding{Code: "code_drift_unavailable", Domain: cognition.ScopeCode})
@@ -845,6 +843,9 @@ func AssessProjectedBudget(cfg *config.Config, set *cognition.Set) BudgetFacts {
 	bytes := len(set.Root.Raw) + len(set.Meta.Raw)
 	violations := []cognitionbudget.Violation{}
 	coverage := cognitionbudget.NewSCoverageTally(policy.S)
+	// The S hard limit is the Meta's own rune quota, the same declaration the
+	// error-level rune gate applies when the projected set is parsed.
+	quota := index.ExtractSQuotaThresholds(string(set.Meta.Raw))
 	for _, id := range []string{cognition.ScopeCode, cognition.ScopeDatabase} {
 		asset := enabledAsset(set, id)
 		if asset == nil {
@@ -852,7 +853,7 @@ func AssessProjectedBudget(cfg *config.Config, set *cognition.Set) BudgetFacts {
 		}
 		bytes += len(asset.Raw)
 		for _, object := range asset.Objects {
-			for _, violation := range cognitionbudget.ValidateEntry(object.CanonicalLine, policy) {
+			for _, violation := range cognitionbudget.ValidateEntryWithSQuota(object.CanonicalLine, policy, quota) {
 				violation.Path = object.CanonicalRef
 				violations = append(violations, violation)
 			}
@@ -921,14 +922,6 @@ func baselineMatches(
 		return false, false
 	}
 	return baseline.EquivalentFingerprints(stored, current, cfg.LineEndingTolerance)
-}
-
-func cloneSnapshot(input map[string]baseline.Fingerprint) map[string]baseline.Fingerprint {
-	result := make(map[string]baseline.Fingerprint, len(input))
-	for path, fingerprint := range input {
-		result[path] = fingerprint
-	}
-	return result
 }
 
 func sortedUnique(values []string) []string {

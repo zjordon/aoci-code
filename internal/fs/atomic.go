@@ -63,6 +63,13 @@ func AtomicWrite(targetPath string, data []byte) error {
 	return atomicWrite(targetPath, data)
 }
 
+// AtomicWriteMode publishes with exactly the given file mode, also when it
+// replaces an existing file, so a private backup never inherits the generic
+// new-file mode or a prior backup's broader permissions.
+func AtomicWriteMode(targetPath string, data []byte, mode os.FileMode) error {
+	return atomicWriteWithPerm(targetPath, data, &mode)
+}
+
 // AtomicCreateCAS publishes complete bytes only when targetPath is absent at
 // the atomic publication instant. It never falls back to an overwrite rename.
 func AtomicCreateCAS(targetPath string, data []byte) error {

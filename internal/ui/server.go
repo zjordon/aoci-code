@@ -2,6 +2,9 @@ package ui
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,7 +61,7 @@ var pageStringKeys = []string{
 	"ui.page.no_action", "ui.page.replaced_on_disk", "ui.page.no_running_server",
 	"ui.page.integration.claude_mcp", "ui.page.integration.claude_hook", "ui.page.integration.codex_mcp",
 	"ui.page.integration.opencode_mcp", "ui.page.integration.qoder_mcp", "ui.page.integration.agents_block",
-	"ui.page.refreshed", "ui.page.up_to_date", "ui.page.disconnected",
+	"ui.page.refreshed", "ui.page.up_to_date", "ui.page.disconnected", "ui.page.unauthorized",
 	"ui.page.tab_all", "ui.page.copy_all", "ui.page.overview_hint", "ui.page.refresh_every",
 	"ui.page.refresh_now", "ui.page.interval_10s", "ui.page.interval_30s", "ui.page.interval_1m",
 	"ui.page.interval_5m", "ui.page.interval_manual", "ui.page.tokens_estimate", "ui.page.tokens_hint",
@@ -75,6 +78,7 @@ type server struct {
 	cache       *repoCache
 	page        []byte
 	allowedHost string
+	accessToken string
 }
 
 // Serve binds a loopback listener, calls ready with the URL, and serves until
@@ -87,7 +91,7 @@ func Serve(ctx context.Context, options Options, ready func(url string, reposito
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 		return &detailError{kind: ErrNotLoopback, detail: host}
 	}
-	roots := normalizeRoots(options.Roots)
+	roots := NormalizeRoots(options.Roots)
 	if options.Discover {
 		for _, instance := range discoverRunningServers() {
 			if instance.Root != "" {
@@ -98,18 +102,23 @@ func Serve(ctx context.Context, options Options, ready func(url string, reposito
 	if len(roots) == 0 {
 		return &detailError{kind: ErrNoRepository, detail: "none"}
 	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return err
+	}
+	accessToken := hex.EncodeToString(secret)
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(options.Port)))
 	if err != nil {
 		return err
 	}
-	url := "http://" + listener.Addr().String() + "/"
+	url := "http://" + listener.Addr().String() + "/#access_token=" + accessToken
 	if dir, dirErr := RegistryDir(options.RegistryDir); dirErr == nil {
 		// Best effort and outside the repository: it lets a later --detach
 		// reuse this page and --stop end it. Serving never depends on it.
 		_ = Register(dir, Registration{PID: os.Getpid(), URL: url, Root: roots[0], StartedAt: time.Now().UTC()})
 		defer func() { _ = Unregister(dir, roots[0], os.Getpid()) }()
 	}
-	s := &server{options: options, roots: roots, cache: newRepoCache(), allowedHost: listener.Addr().String()}
+	s := &server{options: options, roots: roots, cache: newRepoCache(), allowedHost: listener.Addr().String(), accessToken: accessToken}
 	s.page = []byte(renderPage(options.Locale))
 	httpServer := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -127,7 +136,9 @@ func Serve(ctx context.Context, options Options, ready func(url string, reposito
 	return nil
 }
 
-func normalizeRoots(roots []string) []string {
+// NormalizeRoots returns unique absolute roots in input order, skipping blank
+// or unresolvable paths. Serving and registry lookups must share this identity.
+func NormalizeRoots(roots []string) []string {
 	result := []string{}
 	for _, root := range roots {
 		if strings.TrimSpace(root) == "" {
@@ -198,6 +209,10 @@ func (s *server) handler() http.Handler {
 // external resources, no caching outside the ETag handshake.
 func (s *server) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
 		if !hostAllowed(r.Host, s.allowedHost) {
 			http.Error(w, "unexpected Host", http.StatusForbidden)
 			return
@@ -207,9 +222,14 @@ func (s *server) guard(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "read-only", http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Cache-Control", "no-store")
+		// The static shell contains no repository data or token. Every data
+		// route authenticates before repository lookup, including HEAD/ETag.
+		if r.URL.Path != "/" && (s.accessToken == "" ||
+			subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.accessToken)) != 1) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		next(w, r)
 	}
 }

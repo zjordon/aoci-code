@@ -225,7 +225,7 @@ func newScopeExplainCmd() *cobra.Command {
 						EntersWholeIndex: false, EntersObserveFingerprint: false, Reason: source + ":" + afs.SafetyConfigured}
 				} else {
 					curated := containsScopePath(cfg.CurationExclude, rel)
-					item = managedscope.EvaluatePath(cfg.EffectiveManagedScope(), rel, false, curated)
+					item = managedscope.EvaluatePath(cfg.EffectiveManagedScope(), cognition.RootLayout(root), rel, false, curated)
 					item.GitStatus = "future_or_absent"
 				}
 			}
@@ -323,6 +323,9 @@ func newScopeRuleAddCmd() *cobra.Command {
 			if err := rejectUnsupportedGlob(rule.Pattern, rule.PatternKind); err != nil {
 				return managedScopeExitError(err)
 			}
+			if err := rejectFormalAssetRule(rule); err != nil {
+				return managedScopeExitError(err)
+			}
 			err = config.MutateManagedScope(root, func(policy *managedscope.Policy) error {
 				for _, existing := range policy.Rules {
 					if existing.RuleID == rule.RuleID {
@@ -378,6 +381,14 @@ func newScopeRuleUpdateCmd() *cobra.Command {
 					}
 					if cmd.Flags().Changed("enabled") {
 						rule.Enabled = flags.enabled
+					}
+					// A rule that already names a formal asset may be switched off
+					// here; only an enabled result is refused, so the way out of
+					// the rc22 state is never blocked by the check that prevents it.
+					if rule.Enabled {
+						if err := rejectFormalAssetRule(*rule); err != nil {
+							return err
+						}
 					}
 					if err := rejectUnsupportedGlob(rule.Pattern, rule.PatternKind); err != nil {
 						return err
@@ -920,26 +931,7 @@ func buildScopePolicyStatus(root string, includeDrift bool) (*scopePolicyStatus,
 			return nil, fmt.Errorf("managed_scope_code_volume_unavailable")
 		}
 		document = code.Document
-		filteredSnapshot := make(map[string]baseline.Fingerprint, len(snapshot))
-		for path, fingerprint := range snapshot {
-			filteredSnapshot[path] = fingerprint
-		}
-		filteredBaseline := *currentBaseline
-		filteredBaseline.Files = make(map[string]baseline.Fingerprint, len(currentBaseline.Files))
-		for path, fingerprint := range currentBaseline.Files {
-			filteredBaseline.Files[path] = fingerprint
-		}
-		formalPaths := map[string]bool{cfg.IndexPath: true}
-		for _, id := range set.DeclaredOrder {
-			if asset := set.Volumes[id]; asset != nil {
-				formalPaths[asset.Descriptor.Path] = true
-			}
-		}
-		for path := range formalPaths {
-			delete(filteredSnapshot, path)
-			delete(filteredBaseline.Files, path)
-		}
-		snapshot, driftBaseline = filteredSnapshot, &filteredBaseline
+		snapshot, driftBaseline = cognition.BusinessScope(snapshot, currentBaseline)
 	}
 	status.Drift = baseline.DetectManagedScope(root, document, driftBaseline, snapshot,
 		afs.WalkOptions{HighRiskOptIn: cfg.SafeInventoryHighRiskOptIn}, cfg.LineEndingTolerance)
@@ -1062,8 +1054,30 @@ func rejectUnsupportedGlob(pattern, kind string) error {
 	return nil
 }
 
+// rejectFormalAssetRule refuses a file rule that names the Root or a Volume.
+// Evaluation never applies a rule to a formal asset, so a broad glob is left
+// alone; an exact rule can only mean a misunderstanding, and the refusal says
+// which asset it would have reached (#158).
+func rejectFormalAssetRule(rule managedscope.Rule) error {
+	if rule.PatternKind != machinecontract.ScopePatternFile {
+		return nil
+	}
+	pattern, err := managedscope.NormalizePattern(rule.Pattern, rule.PatternKind)
+	if err != nil {
+		return nil
+	}
+	if _, formal := cognition.FormalAssetOwner(pattern); formal {
+		return fmt.Errorf("managed_scope_rule_targets_formal_asset: %s", pattern)
+	}
+	return nil
+}
+
 func managedScopeExitError(err error) error {
-	return &ExitError{Code: ExitInvalid, MachineCode: "managed_scope_invalid", Msg: cliMessage("scope.error", err.Error()), Err: err}
+	message := cliMessage("scope.error", err.Error())
+	if strings.HasPrefix(err.Error(), "managed_scope_formal_volume_baseline_drift:") {
+		message += "\n" + cliMessage("scope.formal_volume_baseline_drift_hint")
+	}
+	return &ExitError{Code: ExitInvalid, MachineCode: "managed_scope_invalid", Msg: message, Err: err}
 }
 
 // managedScopeApprovalEffect renders what a human is actually being asked to

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -134,10 +133,24 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest) (*Completi
 	}
 	defer resp.Body.Close()
 
+	// Error bodies are untrusted and can echo credentials or source content.
+	// Classify before reading so a faulty body cannot mask the HTTP status.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		kind := classifyHTTPStatus(resp.StatusCode)
+		if resp.StatusCode < 400 {
+			// Redirects are never followed; the base URL must be the final address.
+			return nil, &Error{Kind: kind, Message: "端点返回重定向,未跟随", StatusCode: resp.StatusCode}
+		}
+		return nil, &Error{Kind: kind, Message: "端点返回非成功状态", StatusCode: resp.StatusCode}
+	}
+
 	// 响应体读取加上限(防御超大响应导致 OOM);LimitReader 至多读 maxResponseBytes+1 字节
 	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
 	respBody, err := io.ReadAll(limited)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || isTimeoutErr(err) {
+			return nil, &Error{Kind: KindTimeout, Message: "读取端点响应超时", StatusCode: resp.StatusCode, Err: err}
+		}
 		return nil, &Error{Kind: KindNetwork, Message: "读取端点响应失败", StatusCode: resp.StatusCode, Err: err}
 	}
 	if len(respBody) > maxResponseBytes {
@@ -148,24 +161,14 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest) (*Completi
 		}
 	}
 
-	// 非 2xx: 归类并尽量带上端点返回的错误信息
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		kind := classifyHTTPStatus(resp.StatusCode)
-		msg := endpointErrorMessage(respBody)
-		if msg == "" {
-			msg = "端点返回非成功状态"
-		}
-		return nil, &Error{Kind: kind, Message: msg, StatusCode: resp.StatusCode}
-	}
-
 	var wire wireChatResponse
 	if err := json.Unmarshal(respBody, &wire); err != nil {
 		return nil, &Error{Kind: KindResponse, Message: "端点响应 JSON 解析失败", StatusCode: resp.StatusCode, Err: err}
 	}
 
 	// 某些端点以 200 + error 体表达错误
-	if wire.Error != nil && wire.Error.Message != "" {
-		return nil, &Error{Kind: KindHTTP, Message: "端点返回错误: " + wire.Error.Message, StatusCode: resp.StatusCode}
+	if wire.Error != nil {
+		return nil, &Error{Kind: KindHTTP, Message: "端点返回错误", StatusCode: resp.StatusCode}
 	}
 
 	if len(wire.Choices) == 0 {
@@ -196,30 +199,7 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest) (*Completi
 func (c *Client) completionsURL() (string, error) {
 	trimmed := strings.TrimRight(c.baseURL, "/")
 	full := trimmed + DefaultChatCompletionsPath
-	if _, err := url.ParseRequestURI(full); err != nil {
-		return "", &Error{Kind: KindConfig, Message: fmt.Sprintf("端点地址非法: %s", full), Err: err}
-	}
 	return full, nil
-}
-
-// endpointErrorMessage 尝试从端点错误响应体中提取可读信息(尽力而为,失败返回空)。
-func endpointErrorMessage(body []byte) string {
-	var probe struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return ""
-	}
-	if probe.Error != nil && probe.Error.Message != "" {
-		return "端点错误: " + probe.Error.Message
-	}
-	if probe.Message != "" {
-		return "端点错误: " + probe.Message
-	}
-	return ""
 }
 
 // isTimeoutErr 判断是否为网络超时类错误(net.Error 的 Timeout)。

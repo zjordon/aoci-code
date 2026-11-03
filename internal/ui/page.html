@@ -122,6 +122,7 @@
     </div>
   </div>
   <div class="row stats" id="stats"></div>
+  <div class="note" id="access-note" hidden></div>
 </header>
 <main>
   <section id="index-pane">
@@ -146,6 +147,18 @@
 <script id="aoci-data">window.AOCI_I18N = __AOCI_I18N__; window.AOCI_LOCALE = "__AOCI_LANG__";</script>
 <script>
 (function(){
+  // The capability arrives only in the URL fragment, never a request URL.
+  // Keep it in this tab's session storage, not persistent local storage.
+  let accessToken = "";
+  try {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    accessToken = fragment.get("access_token") || sessionStorage.getItem("aoci.accessToken") || "";
+    if (accessToken) sessionStorage.setItem("aoci.accessToken", accessToken);
+    if (fragment.has("access_token")) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  } catch(e) {}
+  const apiFetch = (url, options = {}) => fetch(url, {...options, redirect: "error", headers: {
+    ...(options.headers || {}), ...(accessToken ? {Authorization: "Bearer " + accessToken} : {})
+  }});
   const I18N = window.AOCI_I18N || {};
   const store = { get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
                   set(k,v){ try { localStorage.setItem(k, v); } catch(e){} } };
@@ -234,10 +247,14 @@
     $("aside").style.maxHeight = Math.max(240, window.innerHeight - top - 16) + "px";
   }
 
+  // Every data route answers 401 without the capability from the readiness
+  // link's fragment; say so instead of rendering empty chrome.
+  function showAccessNote(hidden){ const n = $("access-note"); if (n){ if (!hidden) n.textContent = t("ui.page.unauthorized"); n.hidden = !!hidden; } }
   async function loadRepos(){
     try {
-      const r = await fetch("/api/repos");
-      if (!r.ok) return;
+      const r = await apiFetch("/api/repos");
+      if (!r.ok){ if (r.status === 401) showAccessNote(false); return; }
+      showAccessNote(true);
       const next = await r.json();
       if (!Array.isArray(next) || !next.every(r => r && typeof r.root === "string" && r.root !== "" &&
           typeof r.name === "string" && Number.isInteger(r.running) && r.running >= 0)) return;
@@ -252,14 +269,14 @@
     const root = current, sequence = ++refreshSequence;
     const isCurrent = () => root === current && sequence === refreshSequence;
     try {
-      const r = await fetch("/api/state?repo=" + encodeURIComponent(root) + (force ? "&refresh=1" : ""), {headers: etag && !force ? {"If-None-Match": etag} : {}});
+      const r = await apiFetch("/api/state?repo=" + encodeURIComponent(root) + (force ? "&refresh=1" : ""), {headers: etag && !force ? {"If-None-Match": etag} : {}});
       if (!isCurrent()) return;
       if (r.status === 304){
         renderTick(t("ui.page.up_to_date"));
         if (!rawCache.has(JSON.stringify([root, asset]))) renderRaw();
         return;
       }
-      if (!r.ok) throw new Error("state HTTP " + r.status);
+      if (!r.ok){ if (r.status === 401) showAccessNote(false); throw new Error("state HTTP " + r.status); }
       const next = await r.json();
       if (!isCurrent()) return;
       etag = r.headers.get("ETag") || ""; snap = next; rawCache = new Map();
@@ -309,7 +326,7 @@
   async function rawText(id){
     const root = current, cache = rawCache, key = JSON.stringify([root, id]);
     if (cache.has(key)) return cache.get(key);
-    const r = await fetch(`/api/raw?repo=${encodeURIComponent(root)}&asset=${id}`);
+    const r = await apiFetch(`/api/raw?repo=${encodeURIComponent(root)}&asset=${id}`);
     if (!r.ok) throw new Error("raw HTTP " + r.status);
     const text = await r.text();
     if (cache === rawCache) cache.set(key, text);

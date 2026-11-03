@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/aoci-spec/aoci-code/internal/cognition"
 	"github.com/aoci-spec/aoci-code/internal/fs"
 	"github.com/aoci-spec/aoci-code/internal/machinecontract"
 )
@@ -64,8 +65,9 @@ func Build(repositoryRoot string, policy Policy, options BuildOptions) (*Evaluat
 	}
 	result := &Evaluation{Version: machinecontract.ManagedScopeEvaluationV2, PolicyIdentity: identity,
 		SafeInventory: inventory.Summary, Index: []PathEvaluation{}, Observe: []PathEvaluation{}, Exclude: []PathEvaluation{}}
+	formalPinned := cognition.RootLayout(repositoryRoot) == cognition.LayoutVolumesV1
 	for _, rel := range inventory.ManagedCandidates {
-		evaluation := evaluateTrackedPath(normalized, rel, tracked[rel], ignored[rel], curated[rel])
+		evaluation := evaluateTrackedPath(normalized, rel, tracked[rel], ignored[rel], curated[rel], formalPinned)
 		if optedIn[rel] {
 			evaluation.SafetyStatus = "high_risk_exact_opt_in"
 			evaluation.Reason = "approved high-risk exact opt-in; " + evaluation.Reason
@@ -101,11 +103,14 @@ func evaluationIdentity(policyIdentity, inventoryRulesIdentity string, curated [
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func EvaluatePath(policy Policy, rel string, gitIgnored, curationExcluded bool) PathEvaluation {
-	return evaluateTrackedPath(policy, rel, false, gitIgnored, curationExcluded)
+// EvaluatePath judges one path that the inventory may not hold yet; layout is
+// the repository's cognition.RootLayout, because the formal-asset pin below
+// exists only under Volumes v1.
+func EvaluatePath(policy Policy, layout, rel string, gitIgnored, curationExcluded bool) PathEvaluation {
+	return evaluateTrackedPath(policy, rel, false, gitIgnored, curationExcluded, layout == cognition.LayoutVolumesV1)
 }
 
-func evaluateTrackedPath(policy Policy, rel string, gitTracked, gitIgnored, curationExcluded bool) PathEvaluation {
+func evaluateTrackedPath(policy Policy, rel string, gitTracked, gitIgnored, curationExcluded, formalPinned bool) PathEvaluation {
 	role := machinecontract.ScopeRoleIndex
 	reason := "default production role"
 	priority := 100
@@ -115,6 +120,22 @@ func evaluateTrackedPath(policy Policy, rel string, gitTracked, gitIgnored, cura
 	}
 	if gitIgnored {
 		role, reason, priority, source = machinecontract.ScopeRoleExclude, "Git ignored path", 150, "git_ignored"
+	}
+	// The Root and its Volumes are formal cognition assets, owned by their
+	// lifecycle transactions: no rule may give one the observe or exclude
+	// role, because a Baseline that carries a Volume as Observe evidence or
+	// drops it has nothing left to govern the Volume with (#158). A git-hidden
+	// one keeps the exclude role above, so scan still refuses to publish a
+	// Baseline that omits it. The pin is a Volumes v1 fact: under the Legacy
+	// layout aoci.txt is the index itself, an ordinary rule-governed candidate
+	// whose Entry Maintain never plans, so pinning it there would demand an
+	// Entry no command can author.
+	if _, formal := cognition.FormalAssetOwner(rel); formalPinned && formal && !gitIgnored {
+		return PathEvaluation{Version: machinecontract.ManagedScopeEvaluationV2, Path: rel, Role: machinecontract.ScopeRoleIndex,
+			RuleSource: machinecontract.ScopeRuleBuiltin, RulePriority: sourcePriority(machinecontract.ScopeRuleBuiltin),
+			SafetyStatus: "safe_inventory_allowed", GitStatus: gitStatus(gitTracked, gitIgnored),
+			ReadsContent: true, EntersWholeIndex: true, EntersObserveFingerprint: false,
+			Reason: "formal cognition asset: Managed Scope rules do not apply"}
 	}
 	var winner *Rule
 	rules := append(profileRules(policy.Profile), policy.Rules...)

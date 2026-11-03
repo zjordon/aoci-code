@@ -2,8 +2,151 @@
 
 All notable public changes to AOCI-CODE will be documented in this file.
 
-## Unreleased
+## v0.1.0
 
+The first release. It promotes v0.1.0-rc23 unchanged: the product code,
+dependencies, Go toolchain, MCP tool surface, input schemas, formal-asset
+formats, and scope identities are those of `592e90c`, released as rc23 on
+2026-10-29 and soaked since then. The soak found one defect, listed below as
+a known issue. It is not fixed here, so the release stays the build that was
+soaked. The 23 candidate sections below record how it got here.
+
+- The release is no longer a candidate. The GitHub Release is published as the
+  latest release rather than a pre-release; the version pointers in the
+  READMEs, `docs/install.md`, `docs/supply-chain.md`, and NOTICE name `v0.1.0`;
+  and the release workflow's dispatch default moves with them.
+- No behavior change. A repository aligned under rc23 stays aligned, and the
+  upgrade axis orders v0.1.0 after every candidate.
+- Known issue: running `aoci cognition onboard apply` again on an onboarding
+  that already completed writes the session back to `apply_pending`, then
+  answers `onboarding_artifact_conflict`. The formal assets and the Baseline
+  are untouched, and Verify, Check, and the Guide still report aligned; only
+  the transaction and approval states that `cognition onboard status` reads
+  from `.aoci/onboarding/active.json` disagree. Run Apply once. The v0.2.0
+  line returns the recorded result instead and repairs a session left this
+  way.
+
+## v0.1.0-rc23
+
+The rc22 soak's one finding: a Managed Scope rule could reach a formal
+Volume and leave the repository with no command that moved it. Formal assets
+are now outside policy. No MCP tool name, input schema, formal-asset format,
+or scope identity changes.
+
+- A scope rule that reached a formal Volume no longer deadlocks Managed Scope
+  (#158, Loren-0101). A rule could give `aoci.code.txt` the observe role, and
+  the Baseline then carried the Volume as Observe evidence that status, the
+  Guide, and a Scope Change Plan each read differently: the Guide reported it
+  `observed_removed`, `scope acknowledge` answered
+  `observed_evidence_review_not_pending`, and every `scope preview` answered
+  `observed_evidence_review_required`, with no command that moved the
+  repository. Formal assets are now outside policy: evaluation gives the Root
+  and its declared Volumes the index role whatever rules match them (a
+  git-hidden one still stops `scan`), the three readers strip them through one
+  projection, a Volume's Baseline record carries the index role however it was
+  recorded, and `scope rule add` or `update` refuses an exact file rule naming
+  one as `managed_scope_rule_targets_formal_asset` (switching such a rule
+  off is allowed). A repository already in that state is aligned again on
+  upgrade, and its next Scope Change writes the role back. No identity, tool,
+  schema, or format changes.
+- The pre-tag audit of that fix caught two readers it had missed. The pin is
+  decided by the Root marker, so it never reaches a Legacy index file: there
+  `aoci.txt` is an ordinary rule-governed candidate whose Entry Maintain never
+  plans, and pinning it left an rc22-aligned Legacy repository with a custom
+  profile or a `*.txt` rule answering `managed_scope_authoring_candidate_required`
+  for its own index with no command that cleared it. The post-Apply alignment
+  inspector that every `aoci_update_entry` result reads now takes the same
+  projection as status and the Guide, so a Root or Meta record a rule once
+  observed no longer makes each batch report `observed_removed` while
+  governance says aligned.
+
+## v0.1.0-rc22
+
+The rc21 soak's findings and nine contributed fixes: the S hard limit is the
+Meta rune quota, a blocked Maintain names its blocker, `scope acknowledge`
+retires an excluded Observe fingerprint, Maintain candidates carry source-bound
+scale evidence, hooks fail open on configuration errors, a symlinked `--repo`
+is its own Git root, and the base toolchain moves to Go 1.26.10. No MCP tool
+name, input schema, or formal-asset format changes; two additive candidate
+fields and one wider `next_action` vocabulary.
+
+- Toolchain: Go 1.26.10. govulncheck reported GO-2026-6809 (crypto/x509
+  trust in compromised intermediate certificates, reached through the status
+  page's HTTP server) against 1.26.9 from 2026-10-21 on; the nightly Full
+  gate was red on the released tree until the base toolchain moved. No
+  source, contract, or asset change.
+- The S hard limit is the Meta rune quota (#146). The per-C S token band is
+  floored by the effective rune quota, so an S within the quota the authoring
+  contract states is never `entry_field_budget_exceeded`; a CJK Entry at C7
+  was being refused at 80 of its declared 200 characters. The S maximum
+  reported in Maintain and optimization candidates is the floored value. R
+  bands are unchanged. Public contract: Managed Scope and Budget v1, section 8.
+- A blocked Volumes Maintain names its blocker in `next_action` (#147):
+  `explicit_orphan_remove_or_resolve_blocker` only when
+  `orphan_remove_candidates` lists something, otherwise
+  `close_pending_recovery`, `scan_to_establish_baseline`,
+  `activate_scope_change`, `acknowledge_observed_evidence`,
+  `resolve_cognition_budget`, or `resolve_blocker`. `next_commands` is
+  unchanged. Public contract: Cognition Volumes v1, next_commands section.
+- `scope acknowledge` retires an Observe fingerprint that an aligned policy
+  now excludes, instead of refusing the whole review set with
+  `observed_evidence_review_required` once another Observe path changes
+  (#137, reported in #134).
+- Volumes Maintain and `cognition_optimization` Code candidates carry
+  advisory `file_lines` and `expected_e`, counted and hashed from one byte
+  stream and emitted only when the digest equals the issued `source_sha256`
+  (#143, #142). Public contract: Cognition Volumes v1.
+- Hooks fail open on configuration errors: a truncated config or unsupported
+  locale no longer makes `aoci hook pretool` or `aoci hook codex-compact`
+  exit 3 before running, and pretool no longer migrates a legacy config
+  (#144). Public contract: CLI Runtime v1, hook configuration failures.
+- A `--repo` spelled through a symlinked component (`/tmp` on macOS) is the
+  same Git root as its resolved spelling (#145).
+- The optional model client classifies a non-2xx answer before reading its
+  body, and a timeout while reading a body is a timeout, not a network
+  failure (#139, #138).
+- `aoci ui --also <relative> --stop` and a second `--detach` find the page
+  registered under the absolute root (#140).
+- The index parser strips every leading UTF-8 BOM, not one: a doubled BOM
+  left `RawText` starting with the second, so a Document re-parsed from its
+  own `RawText` changed (found by `make fuzz-smoke`; the input is a seed).
+- Managed manifests no longer build an unused standalone Safe Inventory
+  (#133, refs #127); one Windows-only test assertion decodes the Guide JSON
+  before searching it (#141).
+
+## v0.1.0-rc21
+
+Eight user reports, four contributed pull requests, and a test-system
+upgrade: Volume removal keyed on the object's path, a Ledger that survives a
+damaged line, activation that answers `already_aligned`, governed writes on
+WSL DrvFs, MySQL 5.7.6 and later, localized refusals, private host-config
+backups with a guarded status page, and a command tree that starts in
+milliseconds instead of half a second.
+
+- Backups written beside host configuration and formal assets are owner-only.
+  The optional model client refuses redirects and credential-bearing base
+  URLs, keeps a caller-owned HTTP client's own redirect policy, and reports
+  the status, the category, and a sanitized cause class (dns, refused, tls,
+  timeout, redirect) without the endpoint's error body or the transport
+  cause. No MCP or formal-asset schema changes.
+- The loopback status page protects repository data with a per-process
+  capability carried in the readiness URL fragment and sent by the browser
+  in Authorization headers. The static shell contains no capability or
+  repository data, and a page opened without the fragment says which link
+  to open instead of rendering empty. Registrations keep their existing
+  shape; a tokenless page from an older binary can be stopped but is refused
+  by a new start, foreground or detached, until `aoci ui --stop` ends it.
+- An out-of-band edit to a formal Volume under Managed Scope still fails
+  closed with `managed_scope_formal_volume_baseline_drift`, and the refusal
+  now says how to recover: preserve the state, check pending Recovery through
+  the Guide, restore a verified matching snapshot when there is none, and
+  never edit Baseline hashes. The Legacy `baseline scope` refusal names the
+  same route, and `docs/troubleshooting.md` gains the section (#123).
+- A Codex config declaring `[mcp_servers."aoci"]` or `[mcp_servers.'aoci']`
+  was reported as not installed and then given a duplicate bare table. The
+  installer and the status predicate recognize the quoted spellings, optional
+  whitespace, and a trailing comment, and leave such a config byte-for-byte
+  unchanged.
 - Every `aoci` invocation built its command tree by decoding the embedded
   localization manifest once per localized flag, several hundred times, about
   half a second before the first byte of output. The decoded manifest is now

@@ -169,8 +169,15 @@ func Build(repositoryRoot, preparedAt string, candidates CandidateSet) (*Preview
 		return nil, err
 	}
 	oldRoles := baselineRolesExcept(oldBaseline, formalVolumeGuards)
+	// Observe review covers business evidence: the formal assets' Baseline
+	// records are guards, and status and governance strip them through the
+	// same projection, so the three can only ever name the same paths.
+	activeBusiness := oldBaseline
+	if layout == cognition.LayoutVolumesV1 {
+		_, activeBusiness = cognition.BusinessScope(nil, oldBaseline)
+	}
 	if policy.ObserveChangePolicy == machinecontract.ObserveChangeReviewRequired {
-		changes := observedEvidenceChanges(oldBaseline, desiredSnapshot, desiredRoles, vanishedPaths(evaluation),
+		changes := observedEvidenceChanges(activeBusiness, desiredSnapshot, desiredRoles, vanishedPaths(evaluation),
 			activePolicyIdentity(oldBaseline) == policyIdentity, cfg.LineEndingTolerance)
 		if len(changes) != 0 {
 			if candidates.ObserveReview == nil || candidates.ObserveReview.ReviewStatus != ReviewStatusReviewed ||
@@ -727,6 +734,10 @@ func FormalCognitionBaselineGuards(root, indexPath string, active *baseline.Base
 		if equal, _ := baseline.EquivalentFingerprints(stored, current, tolerateLineEndings); !equal {
 			return nil, fmt.Errorf("managed_scope_formal_volume_baseline_drift: %s", asset.Descriptor.Path)
 		}
+		// A Volume's record is a guard, never Observe evidence, so the role it
+		// carries is index however it was recorded; a rule once could record
+		// observe there (#158), and the next Apply writes the role back.
+		stored.Role = machinecontract.ScopeRoleIndex
 		result[asset.Descriptor.Path] = stored
 	}
 	storedRoot, rootManaged := active.Files[indexPath]
@@ -893,9 +904,11 @@ func observedEvidenceChanges(active *baseline.Baseline, desired map[string]basel
 		// fell between those two: the Safe Inventory evaluates it as an unsafe
 		// filesystem object, so it stayed in roles and read as reclassified. It is
 		// gone, and status always said so -- the two lists could then never match
-		// and scope acknowledge refused forever, naming neither path.
+		// and scope acknowledge refused forever, naming neither path. An aligned
+		// policy can also retain an old Observe fingerprint for a now-excluded
+		// path; status reports that as removed, so review must cover it too.
 		_, governed := roles[path]
-		if !governed || vanished[path] {
+		if !governed || vanished[path] || (policyAligned && roles[path] == machinecontract.ScopeRoleExclude) {
 			changes = append(changes, path)
 		}
 	}
